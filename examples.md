@@ -1,12 +1,10 @@
 # Action Transformer Examples
 
-This document provides detailed examples of using the Action Transformer for various scenarios.
+This document demonstrates how to use the Action Transformer models in this repository.
 
-## Basic Usage Examples
+## Basic Examples
 
-### 1. Single-Agent Code Assistant
-
-Train a model to assist with coding tasks:
+### 1. Single-Agent Transformer
 
 ```python
 import torch
@@ -14,9 +12,153 @@ from src.models.action_transformer import ActionTransformer
 from src.utils.masking import create_padding_mask
 
 # Initialize model
-code_assistant = ActionTransformer(
-    state_dim=64,        # Code context features
+model = ActionTransformer(
+    state_dim=64,        # State feature dimension
     action_dim=10,       # Number of possible actions
+    embed_dim=128,       # Embedding dimension
+    num_layers=4,        # Number of transformer layers
+    num_heads=4,         # Number of attention heads
+    hidden_dim=256,      # Hidden layer dimension
+    max_seq_len=100,     # Maximum sequence length
+    discrete_actions=True # Using discrete action space
+)
+
+# Create sample batch
+batch_size = 32
+seq_len = 50
+
+# Input states (batch_size, seq_len, state_dim)
+states = torch.randn(batch_size, seq_len, 64)
+
+# Previous actions (batch_size, seq_len)
+actions = torch.randint(0, 10, (batch_size, seq_len))
+
+# Sequence lengths for each batch
+seq_lens = torch.randint(10, seq_len + 1, (batch_size,))
+
+# Forward pass
+action_preds, values = model(
+    states=states,
+    actions=actions,
+    seq_lens=seq_lens
+)
+
+print(f"Action predictions shape: {action_preds.shape}")  # [batch_size, seq_len, action_dim]
+print(f"Value predictions shape: {values.shape}")        # [batch_size, seq_len]
+```
+
+### 2. Multi-Agent Transformer
+
+```python
+from src.models.multi_agent import MultiAgentTransformer
+
+# Initialize model
+model = MultiAgentTransformer(
+    state_dim=64,           # State feature dimension
+    action_dim=10,          # Number of possible actions
+    embed_dim=128,          # Embedding dimension
+    num_layers=4,           # Number of transformer layers
+    num_heads=4,            # Number of attention heads
+    hidden_dim=256,         # Hidden layer dimension
+    max_seq_len=50,         # Maximum sequence length
+    max_num_agents=4,       # Maximum number of agents
+    discrete_actions=True   # Using discrete action space
+)
+
+# Create sample batch
+batch_size = 16
+num_agents = 3
+seq_len = 30
+
+# Input states (batch_size, num_agents, seq_len, state_dim)
+states = torch.randn(batch_size, num_agents, seq_len, 64)
+
+# Previous actions (batch_size, num_agents, seq_len)
+actions = torch.randint(0, 10, (batch_size, num_agents, seq_len))
+
+# Agent IDs
+agent_ids = torch.arange(num_agents).expand(batch_size, -1)
+
+# Sequence lengths for each agent
+seq_lens = torch.randint(10, seq_len + 1, (batch_size, num_agents))
+
+# Agent mask (which agents are active)
+agent_mask = torch.ones(batch_size, num_agents, dtype=torch.bool)
+agent_mask[:, -1] = 0  # Last agent inactive for demonstration
+
+# Forward pass
+action_preds, values, hidden_states = model(
+    states=states,
+    agent_ids=agent_ids,
+    actions=actions,
+    seq_lens=seq_lens,
+    agent_mask=agent_mask
+)
+
+print(f"Action predictions shape: {action_preds.shape}")  # [batch_size, num_agents, seq_len, action_dim]
+print(f"Value predictions shape: {values.shape}")         # [batch_size, num_agents, seq_len]
+print(f"Hidden states shape: {hidden_states.shape}")      # [batch_size, num_agents, seq_len, embed_dim]
+```
+
+### 3. Hierarchical Transformer
+
+```python
+from src.models.hierarchical import HierarchicalTransformer
+
+# Initialize model
+model = HierarchicalTransformer(
+    state_dim=64,           # State feature dimension
+    action_dim=10,          # Number of possible actions
+    num_options=5,          # Number of high-level options
+    embed_dim=128,          # Embedding dimension
+    num_layers=4,           # Number of transformer layers
+    num_heads=4,            # Number of attention heads
+    hidden_dim=256,         # Hidden layer dimension
+    max_seq_len=50,         # Maximum sequence length
+    discrete_actions=True   # Using discrete action space
+)
+
+# Create sample batch
+batch_size = 16
+seq_len = 30
+
+# Input states (batch_size, seq_len, state_dim)
+states = torch.randn(batch_size, seq_len, 64)
+
+# Previous actions (batch_size, seq_len)
+actions = torch.randint(0, 10, (batch_size, seq_len))
+
+# Current option for each sequence
+options = torch.randint(0, 5, (batch_size,))
+
+# Sequence lengths
+seq_lens = torch.randint(10, seq_len + 1, (batch_size,))
+
+# Forward pass
+option_preds, action_preds, term_preds = model(
+    states=states,
+    actions=actions,
+    options=options,
+    seq_lens=seq_lens
+)
+
+print(f"Option predictions shape: {option_preds.shape}")    # [batch_size, seq_len, num_options]
+print(f"Action predictions shape: {action_preds.shape}")    # [batch_size, seq_len, action_dim]
+print(f"Termination predictions shape: {term_preds.shape}") # [batch_size, seq_len]
+```
+
+## Training Examples
+
+### 1. Training Loop with Loss Computation
+
+```python
+import torch.optim as optim
+from src.losses.action_losses import ActionPredictionLoss
+
+# Initialize model and optimizer
+model = ActionTransformer(
+    state_dim=64,
+    action_dim=10,
     embed_dim=128,
     num_layers=4,
     num_heads=4,
@@ -24,39 +166,47 @@ code_assistant = ActionTransformer(
     max_seq_len=100,
     discrete_actions=True
 )
+optimizer = optim.Adam(model.parameters(), lr=1e-4)
+loss_fn = ActionPredictionLoss(discrete_actions=True)
 
-# Example: Code completion task
-states = [
-    "def fibonacci(n):\n    if n <= 1:\n        return n\n    else:\n        ",
-    "class BinaryTree:\n    def __init__(self):\n        self.value = None\n        ",
-]
-
-# Convert to tensors and create batch
-batch_size = len(states)
-state_tensor = torch.randn(batch_size, 50, 64)  # Encoded states
-action_tensor = torch.randint(0, 10, (batch_size, 50))  # Previous actions
-seq_lengths = torch.tensor([45, 40])  # Actual sequence lengths
-
-# Forward pass
-action_preds, values = code_assistant(
-    states=state_tensor,
-    actions=action_tensor,
-    seq_lens=seq_lengths
-)
-
-# Get next action
-next_action = torch.argmax(action_preds[:, -1], dim=-1)
+# Training loop
+model.train()
+for batch in dataloader:
+    optimizer.zero_grad()
+    
+    # Forward pass
+    action_preds, values = model(
+        states=batch['states'],
+        actions=batch['actions'],
+        seq_lens=batch['seq_lens']
+    )
+    
+    # Compute losses
+    action_loss = loss_fn.discrete_action_loss(
+        action_preds,
+        batch['target_actions'],
+        batch['mask']
+    )
+    value_loss = loss_fn.value_loss(
+        values,
+        batch['target_values'],
+        batch['mask']
+    )
+    
+    # Combined loss
+    loss = action_loss + 0.5 * value_loss
+    
+    # Backward pass
+    loss.backward()
+    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+    optimizer.step()
 ```
 
-### 2. Multi-Agent Collaboration
-
-Train multiple agents to collaborate on a task:
+### 2. Multi-Agent Training
 
 ```python
-from src.models.multi_agent import MultiAgentTransformer
-
-# Initialize model for collaborative coding
-team_model = MultiAgentTransformer(
+# Initialize model and optimizer
+model = MultiAgentTransformer(
     state_dim=64,
     action_dim=10,
     embed_dim=128,
@@ -64,347 +214,303 @@ team_model = MultiAgentTransformer(
     num_heads=4,
     hidden_dim=256,
     max_seq_len=50,
-    max_num_agents=3,  # Reviewer, Implementer, Tester
+    max_num_agents=4,
     discrete_actions=True
 )
+optimizer = optim.Adam(model.parameters(), lr=1e-4)
+loss_fn = ActionPredictionLoss(discrete_actions=True)
 
-# Example: Code review scenario
-batch_size = 2
-num_agents = 3
-seq_len = 30
-
-# Create dummy inputs
-states = torch.randn(batch_size, num_agents, seq_len, 64)  # Code state for each agent
-actions = torch.randint(0, 10, (batch_size, num_agents, seq_len))  # Previous actions
-agent_ids = torch.arange(num_agents).expand(batch_size, -1)  # Agent identities
-
-# Create agent masks (all agents active)
-agent_mask = torch.ones(batch_size, num_agents, dtype=torch.bool)
-
-# Forward pass
-action_preds, values, hidden_states = team_model(
-    states=states,
-    agent_ids=agent_ids,
-    actions=actions,
-    seq_lens=torch.full((batch_size, num_agents), seq_len),
-    agent_mask=agent_mask
-)
+# Training loop
+model.train()
+for batch in dataloader:
+    optimizer.zero_grad()
+    
+    # Forward pass
+    action_preds, values, hidden_states = model(
+        states=batch['states'],
+        agent_ids=batch['agent_ids'],
+        actions=batch['actions'],
+        seq_lens=batch['seq_lens'],
+        agent_mask=batch['agent_mask']
+    )
+    
+    # Compute losses (only for active agents)
+    mask = batch['mask'] & batch['agent_mask'].unsqueeze(-1)
+    
+    action_loss = loss_fn.discrete_action_loss(
+        action_preds,
+        batch['target_actions'],
+        mask
+    )
+    value_loss = loss_fn.value_loss(
+        values,
+        batch['target_values'],
+        mask
+    )
+    
+    # Combined loss
+    loss = action_loss + 0.5 * value_loss
+    
+    # Backward pass
+    loss.backward()
+    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+    optimizer.step()
 ```
 
-## Advanced Examples
-
-### 1. Hierarchical Task Planning
-
-Use hierarchical transformer for complex tasks:
+### 3. Hierarchical Training
 
 ```python
-from src.models.hierarchical import HierarchicalTransformer
-
-# Define high-level options
-options = [
-    "design_architecture",
-    "implement_feature",
-    "write_tests",
-    "review_code",
-    "refactor"
-]
-
-# Initialize hierarchical model
-planner = HierarchicalTransformer(
+# Initialize model and optimizer
+model = HierarchicalTransformer(
     state_dim=64,
     action_dim=10,
-    num_options=len(options),
+    num_options=5,
     embed_dim=128,
     num_layers=4,
     num_heads=4,
     hidden_dim=256,
+    max_seq_len=50,
+    discrete_actions=True
+)
+optimizer = optim.Adam(model.parameters(), lr=1e-4)
+loss_fn = ActionPredictionLoss(discrete_actions=True)
+
+# Training loop
+model.train()
+for batch in dataloader:
+    optimizer.zero_grad()
+    
+    # Forward pass
+    option_preds, action_preds, term_preds = model(
+        states=batch['states'],
+        actions=batch['actions'],
+        options=batch['options'],
+        seq_lens=batch['seq_lens']
+    )
+    
+    # Compute losses
+    action_loss = loss_fn.discrete_action_loss(
+        action_preds,
+        batch['target_actions'],
+        batch['mask']
+    )
+    option_loss = loss_fn.discrete_action_loss(
+        option_preds,
+        batch['target_options'],
+        batch['mask']
+    )
+    term_loss = F.binary_cross_entropy_with_logits(
+        term_preds,
+        batch['termination'],
+        batch['mask'].float()
+    )
+    
+    # Combined loss
+    loss = action_loss + option_loss + 0.1 * term_loss
+    
+    # Backward pass
+    loss.backward()
+    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+    optimizer.step()
+```
+
+## Real-World Applications
+
+The Action Transformer architecture is particularly well-suited for sequential decision-making tasks where context and history matter. Here are key applications:
+
+### 1. Code Generation and Assistance
+
+The Action Transformer can be trained to assist with coding tasks by:
+- Learning from developer actions and code changes
+- Understanding programming patterns and context
+- Generating code completions and suggestions
+
+Example use cases:
+```python
+# Code Completion Model
+code_assistant = ActionTransformer(
+    state_dim=512,      # Code context embedding size
+    action_dim=32000,   # Vocabulary size for code tokens
+    embed_dim=256,
+    num_layers=6,
+    num_heads=8,
+    hidden_dim=512,
+    max_seq_len=1024,   # Support longer code sequences
+    discrete_actions=True
+)
+
+# State could represent:
+# - Current file content
+# - Open files/workspace context
+# - Recent edits
+# - Cursor position
+# - File type and language
+
+# Actions could be:
+# - Next token prediction
+# - Code block completion
+# - Function/class suggestions
+# - Bug fixes
+# - Refactoring operations
+```
+
+### 2. Task Planning and Automation
+
+The Hierarchical Transformer excels at breaking down complex tasks:
+```python
+# Task Planning Model
+task_planner = HierarchicalTransformer(
+    state_dim=128,          # Task context features
+    action_dim=50,          # Primitive actions
+    num_options=10,         # High-level tasks like:
+                           # - Data preprocessing
+                           # - Model training
+                           # - Evaluation
+                           # - Deployment
+    embed_dim=256,
+    num_layers=4,
+    num_heads=4,
+    hidden_dim=512,
     max_seq_len=100,
     discrete_actions=True
 )
 
-# Example: Complex development task
-batch_size = 1
-seq_len = 50
+# Can be used for:
+# - ML pipeline automation
+# - CI/CD workflows
+# - Data processing pipelines
+# - Project management
+```
 
-# Create inputs
-states = torch.randn(batch_size, seq_len, 64)
-actions = torch.randint(0, 10, (batch_size, seq_len))
-current_option = torch.randint(0, len(options), (batch_size,))
+### 3. Multi-Agent Systems
 
-# Forward pass
-option_preds, action_preds, term_preds = planner(
-    states=states,
-    actions=actions,
-    options=current_option,
-    seq_lens=torch.tensor([seq_len])
+The Multi-Agent Transformer enables coordinated behavior:
+```python
+# Collaborative System
+team_model = MultiAgentTransformer(
+    state_dim=128,
+    action_dim=20,
+    embed_dim=256,
+    num_layers=4,
+    num_heads=8,
+    hidden_dim=512,
+    max_seq_len=50,
+    max_num_agents=5,    # Different roles like:
+                        # - Code reviewer
+                        # - Implementation specialist
+                        # - Testing expert
+                        # - Documentation writer
+                        # - Project manager
+    discrete_actions=True
 )
 
-# Interpret results
-next_option = torch.argmax(option_preds[:, -1], dim=-1)
-should_terminate = term_preds[:, -1] > 0.5
-next_action = torch.argmax(action_preds[:, -1], dim=-1)
+# Applications:
+# - Code review automation
+# - Team coordination
+# - Distributed systems
+# - Multi-robot control
 ```
 
-### 2. Real-world Training Pipeline
+### 4. Interactive Assistants
 
-Complete training pipeline with data loading and evaluation:
-
+Action Transformer can power interactive AI assistants:
 ```python
-import torch.optim as optim
-from torch.utils.data import DataLoader
-from src.data.dataset import AgentInteractionDataset
-from src.models.action_transformer import ActionTransformer
-from src.losses.action_losses import ActionPredictionLoss
+# Interactive Assistant
+assistant = ActionTransformer(
+    state_dim=768,      # Large context embedding
+    action_dim=1000,    # Response actions
+    embed_dim=512,
+    num_layers=8,
+    num_heads=8,
+    hidden_dim=1024,
+    max_seq_len=2048,   # Long conversation history
+    discrete_actions=True
+)
 
-class TrainingPipeline:
-    def __init__(self, config):
-        self.model = ActionTransformer(
-            state_dim=config.state_dim,
-            action_dim=config.action_dim,
-            embed_dim=config.embed_dim,
-            num_layers=config.num_layers,
-            num_heads=config.num_heads,
-            hidden_dim=config.hidden_dim,
-            max_seq_len=config.max_seq_len,
-            discrete_actions=config.discrete_actions
-        )
-        
-        self.optimizer = optim.Adam(self.model.parameters(), lr=config.lr)
-        self.loss_fn = ActionPredictionLoss(discrete_actions=config.discrete_actions)
-        
-    def train_epoch(self, dataloader):
-        self.model.train()
-        total_loss = 0
-        
-        for batch in dataloader:
-            self.optimizer.zero_grad()
-            
-            # Forward pass
-            action_preds, values = self.model(
-                states=batch['states'],
-                actions=batch['actions'],
-                seq_lens=batch['seq_lens']
-            )
-            
-            # Compute losses
-            action_loss = self.loss_fn.discrete_action_loss(
-                action_preds,
-                batch['target_actions'],
-                batch['mask']
-            )
-            value_loss = self.loss_fn.value_loss(
-                values,
-                batch['target_values'],
-                batch['mask']
-            )
-            
-            # Combined loss
-            loss = action_loss + 0.5 * value_loss
-            
-            # Backward pass
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-            self.optimizer.step()
-            
-            total_loss += loss.item()
-            
-        return total_loss / len(dataloader)
-
-# Usage example
-config = {
-    'state_dim': 64,
-    'action_dim': 10,
-    'embed_dim': 128,
-    'num_layers': 4,
-    'num_heads': 4,
-    'hidden_dim': 256,
-    'max_seq_len': 100,
-    'discrete_actions': True,
-    'lr': 1e-4
-}
-
-# Create dataset and dataloader
-dataset = AgentInteractionDataset('path/to/data')
-dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
-
-# Initialize and train
-pipeline = TrainingPipeline(config)
-num_epochs = 10
-
-for epoch in range(num_epochs):
-    loss = pipeline.train_epoch(dataloader)
-    print(f"Epoch {epoch+1}, Loss: {loss:.4f}")
+# Features:
+# - Context-aware responses
+# - Memory of conversation history
+# - Task tracking
+# - Personalization
+# - Tool use and API integration
 ```
 
-### 3. Evaluation and Inference
+### 5. Reinforcement Learning Applications
 
-Example of model evaluation and inference:
-
+The architecture is particularly powerful for RL:
 ```python
-class ModelEvaluator:
-    def __init__(self, model):
-        self.model = model
-        self.model.eval()
-    
-    def evaluate_sequence(self, state_sequence):
-        """Evaluate model on a sequence of states."""
-        with torch.no_grad():
-            batch_size = 1
-            seq_len = len(state_sequence)
-            
-            # Convert states to tensor
-            states = torch.stack(state_sequence).unsqueeze(0)  # [1, seq_len, state_dim]
-            actions = torch.zeros(batch_size, seq_len)  # Dummy actions
-            seq_lens = torch.tensor([seq_len])
-            
-            # Get predictions
-            action_preds, values = self.model(states, actions, seq_lens)
-            
-            return {
-                'action_probs': torch.softmax(action_preds[0], dim=-1),
-                'value_estimates': values[0]
-            }
-    
-    def get_action_distribution(self, state, temperature=1.0):
-        """Get action distribution for a single state."""
-        with torch.no_grad():
-            state = state.unsqueeze(0).unsqueeze(0)  # [1, 1, state_dim]
-            action_preds, _ = self.model(state, None, torch.tensor([1]))
-            
-            # Apply temperature
-            logits = action_preds[0, 0] / temperature
-            probs = torch.softmax(logits, dim=-1)
-            
-            return probs
+# RL Agent
+rl_agent = ActionTransformer(
+    state_dim=128,      # Environment state
+    action_dim=30,      # Available actions
+    embed_dim=256,
+    num_layers=4,
+    num_heads=4,
+    hidden_dim=512,
+    max_seq_len=50,     # Recent history window
+    discrete_actions=True
+)
 
-# Usage example
-evaluator = ModelEvaluator(trained_model)
-
-# Evaluate a sequence
-state_sequence = [torch.randn(64) for _ in range(10)]
-results = evaluator.evaluate_sequence(state_sequence)
-
-# Get action distribution for a state
-state = torch.randn(64)
-action_probs = evaluator.get_action_distribution(state, temperature=0.8)
+# Capabilities:
+# - Learning from demonstrations
+# - Policy optimization
+# - Value estimation
+# - Long-term planning
+# - Multi-task learning
 ```
 
-## Integration Examples
+## Key Benefits
 
-### 1. Web API Integration
+1. **Context Awareness**: The transformer's attention mechanism allows it to:
+   - Consider full history of states and actions
+   - Identify relevant patterns and dependencies
+   - Make decisions based on long-term context
 
-Example of serving model predictions through a web API:
+2. **Hierarchical Planning**: Using the hierarchical variant enables:
+   - Breaking down complex tasks
+   - Learning reusable sub-tasks
+   - Managing long-horizon planning
 
-```python
-from fastapi import FastAPI
-from pydantic import BaseModel
-import torch
+3. **Multi-Agent Coordination**: The multi-agent architecture supports:
+   - Team-based decision making
+   - Role specialization
+   - Inter-agent communication
+   - Collaborative problem solving
 
-app = FastAPI()
+4. **Flexibility**: The architecture can handle:
+   - Variable length sequences
+   - Different types of inputs/outputs
+   - Multiple objectives
+   - Both discrete and continuous actions
 
-class StateInput(BaseModel):
-    state: list[float]
-    temperature: float = 1.0
+5. **Scalability**: The model scales well to:
+   - Large action spaces
+   - Complex state representations
+   - Long sequences
+   - Multiple agents
 
-class ActionOutput(BaseModel):
-    action_probs: list[float]
-    value: float
+## Training Data Sources
 
-@app.post("/predict")
-async def predict_action(input_data: StateInput):
-    # Convert input to tensor
-    state = torch.tensor(input_data.state).unsqueeze(0)
-    
-    # Get model prediction
-    with torch.no_grad():
-        action_preds, value = model(
-            states=state.unsqueeze(0),
-            actions=None,
-            seq_lens=torch.tensor([1])
-        )
-        
-        # Apply temperature and get probabilities
-        logits = action_preds[0, 0] / input_data.temperature
-        probs = torch.softmax(logits, dim=-1)
-        
-        return ActionOutput(
-            action_probs=probs.tolist(),
-            value=value[0, 0].item()
-        )
-```
+The Action Transformer can learn from various data sources:
 
-### 2. Multi-Agent System Integration
+1. **Expert Demonstrations**
+   - Human developers' coding sessions
+   - Task completion recordings
+   - Professional workflows
 
-Example of integrating with a multi-agent system:
+2. **Interaction Logs**
+   - User-assistant conversations
+   - System interaction traces
+   - Tool usage patterns
 
-```python
-class AgentSystem:
-    def __init__(self, num_agents):
-        self.model = MultiAgentTransformer(
-            state_dim=64,
-            action_dim=10,
-            embed_dim=128,
-            num_layers=4,
-            num_heads=4,
-            hidden_dim=256,
-            max_seq_len=50,
-            max_num_agents=num_agents,
-            discrete_actions=True
-        )
-        self.state_buffer = []
-        self.action_buffer = []
-        
-    def add_observation(self, agent_states, agent_actions):
-        """Add new observation to the system."""
-        self.state_buffer.append(agent_states)
-        self.action_buffer.append(agent_actions)
-        
-        # Keep only recent history
-        max_history = 50
-        if len(self.state_buffer) > max_history:
-            self.state_buffer = self.state_buffer[-max_history:]
-            self.action_buffer = self.action_buffer[-max_history:]
-    
-    def get_actions(self, agent_mask=None):
-        """Get next actions for all agents."""
-        with torch.no_grad():
-            # Prepare input tensors
-            states = torch.stack(self.state_buffer).unsqueeze(0)
-            actions = torch.stack(self.action_buffer).unsqueeze(0)
-            seq_len = len(self.state_buffer)
-            
-            # Create agent IDs and mask
-            num_agents = states.size(2)
-            agent_ids = torch.arange(num_agents).unsqueeze(0)
-            if agent_mask is None:
-                agent_mask = torch.ones(1, num_agents, dtype=torch.bool)
-            
-            # Get predictions
-            action_preds, _, _ = self.model(
-                states=states,
-                agent_ids=agent_ids,
-                actions=actions,
-                seq_lens=torch.tensor([[seq_len]]),
-                agent_mask=agent_mask
-            )
-            
-            # Return last prediction for each agent
-            return torch.argmax(action_preds[0, :, -1], dim=-1)
+3. **Automated Systems**
+   - CI/CD pipelines
+   - Automated tests
+   - Deployment logs
 
-# Usage example
-system = AgentSystem(num_agents=3)
+4. **Multi-Agent Interactions**
+   - Team collaborations
+   - Code reviews
+   - Project management data
 
-# Simulate environment steps
-for step in range(100):
-    # Get environment state
-    agent_states = torch.randn(3, 64)  # State for each agent
-    agent_actions = torch.randint(0, 10, (3,))  # Previous actions
-    
-    # Update system
-    system.add_observation(agent_states, agent_actions)
-    
-    # Get next actions
-    next_actions = system.get_actions()
-```
-
-These examples demonstrate the flexibility and capabilities of the Action Transformer architecture in various scenarios. They can be adapted and extended based on specific requirements. 
+These examples demonstrate how Action Transformer can be applied to real-world problems requiring sequential decision-making, planning, and coordination. 
